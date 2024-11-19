@@ -99,12 +99,6 @@ The API uses a version number in the URL to ensure backwards compatibility. The 
 
 ---
 
-### Security
-
-The API uses **HTTPS** to encrypt data in transit. Make sure to use a secure connection when making requests in a production environment. For local development, you can use HTTP.
-
----
-
 ## Contributing
 
 ### Yay! You want to help?
