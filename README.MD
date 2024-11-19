@@ -29,7 +29,7 @@ An image color converter inspired by [ImageGoNord](https://github.com/Schroeding
 const axios = require('axios');
 
 const file = 'path/to/image.jpg';
-const colors = ['#FF0000', '#00FF00'];  // Only the first color will be applied
+const colors = ['#FF0000', '#00FF00'];
 
 axios.post('http://localhost:3000/v1/convert-async', {
   file: file,
