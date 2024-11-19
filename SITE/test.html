@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Image Color Converter</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <div class="container">
+    <h1>Image Color Converter</h1>
+
+    <!-- File Upload Section -->
+    <div class="upload-section">
+      <label for="image-file">Upload Image</label>
+      <input type="file" id="image-file" accept="image/jpeg, image/png" />
+    </div>
+
+    <!-- Color Palette Section -->
+    <div class="color-section">
+      <label for="colors">Enter Color Palette (comma separated):</label>
+      <input type="text" id="colors" placeholder="e.g. #ff0000, #00ff00, #0000ff" />
+    </div>
+
+    <button id="submit-btn">Submit</button>
+
+    <!-- Job Status Section -->
+    <div class="status-section">
+      <label for="job-id">Enter Job ID to Check Status:</label>
+      <input type="text" id="job-id" />
+      <button id="status-btn">Check Status</button>
+      <div id="job-status"></div>
+    </div>
+
+    <div id="message"></div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
