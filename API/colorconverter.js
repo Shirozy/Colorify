@@ -4,11 +4,10 @@ import path from 'path';
 import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
 import bodyParser from 'body-parser';
-import sharp from 'sharp';
 import cors from 'cors';
-
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import { createCanvas, loadImage } from 'canvas';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -17,7 +16,6 @@ const app = express();
 const port = 3000;
 
 app.use(cors());
-
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
@@ -41,11 +39,54 @@ function getOutputPath(jobId) {
   return path.join(__dirname, 'output', `${jobId}.png`);
 }
 
-function hexToRgb(hex) {
-  const bigint = parseInt(hex.slice(1), 16);
-  return [bigint >> 16 & 255, bigint >> 8 & 255, bigint & 255];
+async function convertImage(job) {
+  const { filePath, jobId, palette, blend } = job;
+
+  try {
+    const outputFilePath = getOutputPath(jobId);
+
+    // Load the image
+    const img = await loadImage(filePath);
+    const canvas = createCanvas(img.width, img.height);
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+    // Convert image to selected palette
+    const convertedData = convertImageToPalette(imageData, palette, blend);
+    ctx.putImageData(convertedData, 0, 0);
+
+    // Save the processed image
+    const buffer = canvas.toBuffer('image/png');
+    fs.writeFileSync(outputFilePath, buffer);
+
+    // Delete the original file after processing
+    fs.unlinkSync(filePath);
+
+    // Store the result
+    jobResults[jobId] = { outputPath: outputFilePath };
+    return { outputPath: outputFilePath };
+  } catch (error) {
+    console.error('Error processing image:', error);
+    throw new Error('Image processing failed');
+  }
 }
 
+async function processJobs() {
+  while (jobQueue.length > 0) {
+    const job = jobQueue.shift();
+    try {
+      await convertImage(job);
+    } catch (error) {
+      console.error('Job failed:', error);
+    }
+  }
+}
+
+setInterval(processJobs, 1000);
+
+// Helper functions for color conversion
 function colorDifference(color1, color2) {
   return Math.abs(color1[0] - color2[0]) + Math.abs(color1[1] - color2[1]) + Math.abs(color1[2] - color2[2]);
 }
@@ -64,6 +105,11 @@ function getClosestColor(color, palette) {
   return closestColor;
 }
 
+function hexToRgb(hex) {
+  const bigint = parseInt(hex.slice(1), 16);
+  return [bigint >> 16 & 255, bigint >> 8 & 255, bigint & 255];
+}
+
 function convertImageToPalette(imageData, palette, blend = false) {
   const data = imageData.data;
   for (let i = 0; i < data.length; i += 4) {
@@ -79,77 +125,24 @@ function convertImageToPalette(imageData, palette, blend = false) {
   return imageData;
 }
 
-async function convertImage(job) {
-    const { filePath, palette, jobId, blend } = job;
-    
-    try {
-      const outputFilePath = getOutputPath(jobId);
-      const image = sharp(filePath);
-
-      const { data, info } = await image.raw().toBuffer({ resolveWithObject: true });
-
-      const imageData = {
-        width: info.width,
-        height: info.height,
-        data: data
-      };
-  
-      const convertedData = convertImageToPalette(imageData, palette, blend);
-  
-      // Write the modified image to the output file path
-      await sharp(Buffer.from(convertedData.data), { raw: { width: info.width, height: info.height, channels: 3 } })
-        .toFile(outputFilePath);
-      
-      // Delete the original file after processing
-      fs.unlinkSync(filePath); 
-  
-      // Store the result
-      jobResults[jobId] = { outputPath: outputFilePath };
-      return { outputPath: outputFilePath };
-    } catch (error) {
-      console.error('Error processing image:', error);
-      throw new Error('Image conversion failed');
-    }
-  }
-  
-
-async function processJobs() {
-  while (jobQueue.length > 0) {
-    const job = jobQueue.shift();
-    try {
-      await convertImage(job);
-    } catch (error) {
-      console.error('Job failed:', error);
-    }
-  }
-}
-
-setInterval(processJobs, 1000);
-
 app.post('/v1/convert-async', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'You need to provide a valid image file' });
     }
 
-    const colors = req.body.colors ? req.body.colors.split(',') : [];
-    const blend = req.body.blend === 'true';
-
-    if (colors.length === 0) {
-      return res.status(400).json({ error: 'You must provide at least one color in the palette' });
+    const { colors } = req.body;
+    if (!colors) {
+      return res.status(400).json({ error: 'You need to provide a color palette' });
     }
-
-    const selectedPalette = colors.map(hexColor => {
-      if (!/^#[0-9A-F]{6}$/i.test(hexColor)) {
-        throw new Error('Invalid hex color format');
-      }
-      return hexColor;
-    });
 
     const jobId = uuidv4();
     const filePath = req.file.path;
 
-    jobQueue.push({ jobId, filePath, palette: selectedPalette, blend });
+    const palette = colors.split(',').map(color => color.trim());
+    
+    // Add job to queue with palette
+    jobQueue.push({ jobId, filePath, palette });
 
     res.status(200).json({ jobId });
   } catch (error) {
@@ -161,7 +154,6 @@ app.post('/v1/convert-async', upload.single('file'), async (req, res) => {
 app.get('/v1/job-status/:jobId', async (req, res) => {
   try {
     const jobId = req.params.jobId;
-
     const result = jobResults[jobId];
 
     if (!result) {

@@ -13,14 +13,27 @@
 
     <!-- File Upload Section -->
     <div class="upload-section">
-      <label for="image-file">Upload Image</label>
+      <label for="image-file" class="custom-file-label">Choose File</label>
       <input type="file" id="image-file" accept="image/jpeg, image/png" />
-    </div>
+      <span id="file-name">No file chosen</span>
+    </div>    
 
     <!-- Color Palette Section -->
     <div class="color-section">
-      <label for="colors">Enter Color Palette (comma separated):</label>
-      <input type="text" id="colors" placeholder="e.g. #ff0000, #00ff00, #0000ff" />
+      <label for="color-palette">Choose a Color Palette:</label>
+      <select id="color-palette">
+        <option value="dracula">Dracula</option>
+        <option value="tokyonight">Tokyo Night</option>
+        <option value="nord">Nord</option>
+        <option value="catppuccin">Catppuccin</option>
+        <option value="monokai">Monokai</option>
+        <option value="solarized">Solarized</option>
+        <option value="custom">Custom</option>
+      </select>
+      <div id="custom-color-input" style="display: none;">
+        <label for="colors">Enter Custom Color Palette (comma separated):</label>
+        <input type="text" id="colors" placeholder="e.g. #ff0000, #00ff00, #0000ff" />
+      </div>
     </div>
 
     <button id="submit-btn">Submit</button>
