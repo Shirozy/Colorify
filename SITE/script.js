@@ -1,132 +1,173 @@
-const submitButton = document.getElementById('submit-btn');
-const statusButton = document.getElementById('status-btn');
-const messageDiv = document.getElementById('message');
-const jobStatusDiv = document.getElementById('job-status');
-const imageFileInput = document.getElementById('image-file');
-const colorPaletteSelect = document.getElementById('color-palette');
-const customColorInput = document.getElementById('custom-color-input');
-const colorsInput = document.getElementById('colors');
-const jobIdInput = document.getElementById('job-id');
-const fileInput = document.getElementById('image-file');
-const fileNameDisplay = document.getElementById('file-name');
+import express from 'express';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
+import { v4 as uuidv4 } from 'uuid';
+import bodyParser from 'body-parser';
+import cors from 'cors';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+import { createCanvas, loadImage } from 'canvas';
 
-fileInput.addEventListener('change', () => {
-  const fileName = fileInput.files[0]?.name || 'No file chosen';
-  fileNameDisplay.textContent = fileName;
-});
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
-// Predefined color palettes
-const palettes = {
-  dracula: ['#ff79c6', '#bd93f9', '#ffb86c', '#50fa7b', '#8be9fd'],
-  tokyonight: ['#7aa2f7', '#bb9af7', '#7dcfff', '#c0caf5', '#a9b1d6'],
-  nord: ['#88c0d0', '#81a1c1', '#5e81ac', '#8fbcbb', '#d08770'],
-  catppuccin: ['#f5c2e7', '#b4befe', '#a6e3a1', '#f38ba8', '#fab387'],
-  monokai: ['#f92672', '#a6e22e', '#66d9ef', '#fd971f', '#ae81ff'],
-  solarized: ['#268bd2', '#2aa198', '#b58900', '#859900', '#dc322f']
-};
+const app = express();
+const port = 3000;
 
-// Show/hide custom input field based on selected palette
-colorPaletteSelect.addEventListener('change', () => {
-  if (colorPaletteSelect.value === 'custom') {
-    customColorInput.style.display = 'block';
-  } else {
-    customColorInput.style.display = 'none';
+app.use(cors());
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
+
+const upload = multer({
+  dest: 'uploads/',
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = /jpeg|jpg|png/;
+    const mimeType = allowedTypes.test(file.mimetype);
+    if (mimeType) {
+      return cb(null, true);
+    } else {
+      return cb(new Error('Invalid file type'), false);
+    }
   }
 });
 
-submitButton.addEventListener('click', async () => {
-  const file = imageFileInput.files[0];
-  const selectedPalette = colorPaletteSelect.value;
+const jobQueue = [];
+const jobResults = {};
 
-  messageDiv.textContent = '';
-  jobStatusDiv.textContent = '';
+function getOutputPath(jobId) {
+  return path.join(__dirname, 'output', `${jobId}.png`);
+}
 
-  if (!file) {
-    messageDiv.textContent = 'Please select an image file!';
-    messageDiv.style.color = '#bf616a';
-    return;
+async function convertImage(job) {
+  const { filePath, jobId, palette, blend } = job;
+
+  try {
+    const outputFilePath = getOutputPath(jobId);
+
+    // Load the image
+    const img = await loadImage(filePath);
+    const canvas = createCanvas(img.width, img.height);
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+    // Convert image to selected palette
+    const convertedData = convertImageToPalette(imageData, palette, blend);
+    ctx.putImageData(convertedData, 0, 0);
+
+    // Save the processed image
+    const buffer = canvas.toBuffer('image/png');
+    fs.writeFileSync(outputFilePath, buffer);
+
+    // Delete the original file after processing
+    fs.unlinkSync(filePath);
+
+    // Store the result
+    jobResults[jobId] = { outputPath: outputFilePath };
+    return { outputPath: outputFilePath };
+  } catch (error) {
+    console.error('Error processing image:', error);
+    throw new Error('Image processing failed');
   }
+}
 
-  let colors;
-  if (selectedPalette === 'custom') {
-    colors = colorsInput.value.trim();
+async function processJobs() {
+  while (jobQueue.length > 0) {
+    const job = jobQueue.shift();
+    try {
+      await convertImage(job);
+    } catch (error) {
+      console.error('Job failed:', error);
+    }
+  }
+}
 
+setInterval(processJobs, 1000);
+
+// Helper functions for color conversion
+function colorDifference(color1, color2) {
+  return Math.abs(color1[0] - color2[0]) + Math.abs(color1[1] - color2[1]) + Math.abs(color1[2] - color2[2]);
+}
+
+function getClosestColor(color, palette) {
+  let minDiff = Infinity;
+  let closestColor = palette[0];
+  palette.forEach(paletteColor => {
+    const paletteRgb = hexToRgb(paletteColor);
+    const diff = colorDifference(color, paletteRgb);
+    if (diff < minDiff) {
+      minDiff = diff;
+      closestColor = paletteRgb;
+    }
+  });
+  return closestColor;
+}
+
+function hexToRgb(hex) {
+  const bigint = parseInt(hex.slice(1), 16);
+  return [bigint >> 16 & 255, bigint >> 8 & 255, bigint & 255];
+}
+
+function convertImageToPalette(imageData, palette, blend = false) {
+  const data = imageData.data;
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i], g = data[i + 1], b = data[i + 2];
+    let closestColor = getClosestColor([r, g, b], palette);
+
+    if (blend) {
+      closestColor = [(r + closestColor[0]) / 5, (g + closestColor[1]) / 5, (b + closestColor[2]) / 5];
+    }
+
+    [data[i], data[i + 1], data[i + 2]] = closestColor;
+  }
+  return imageData;
+}
+
+app.post('/v1/convert-async', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'You need to provide a valid image file' });
+    }
+
+    const { colors } = req.body;
     if (!colors) {
-      messageDiv.textContent = 'Please provide a custom color palette!';
-      messageDiv.style.color = '#bf616a';
-      return;
+      return res.status(400).json({ error: 'You need to provide a color palette' });
     }
 
-    const colorArray = colors.split(',');
-    const validColors = colorArray.every(color => /^#[0-9A-F]{6}$/i.test(color));
+    const jobId = uuidv4();
+    const filePath = req.file.path;
+
+    const palette = colors.split(',').map(color => color.trim());
     
-    if (!validColors) {
-      messageDiv.textContent = 'Please provide valid hex colors in the palette (e.g., #ff0000,#00ff00).';
-      messageDiv.style.color = '#bf616a';
-      return;
-    }
-  } else {
-    colors = palettes[selectedPalette].join(',');
-  }
+    // Add job to queue with palette
+    jobQueue.push({ jobId, filePath, palette });
 
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('colors', colors);
-
-  try {
-    messageDiv.textContent = 'Processing... Please wait.';
-    messageDiv.style.color = '#5e81ac';
-
-    const response = await fetch('http://localhost:3000/v1/convert-async', {
-      method: 'POST',
-      body: formData,
-    });
-
-    const data = await response.json();
-
-    if (response.ok) {
-      messageDiv.textContent = `Job submitted successfully! Your job ID: ${data.jobId}`;
-      messageDiv.style.color = '#a3be8c';
-      jobIdInput.value = data.jobId;  // Save job ID for later status check
-    } else {
-      messageDiv.textContent = data.error || 'An error occurred.';
-      messageDiv.style.color = '#bf616a';
-    }
+    res.status(200).json({ jobId });
   } catch (error) {
-    console.error(error);
-    messageDiv.textContent = 'Error submitting job!';
-    messageDiv.style.color = '#bf616a';
+    console.error('Error in /v1/convert-async:', error);
+    return res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-statusButton.addEventListener('click', async () => {
-  const jobId = jobIdInput.value.trim();
-
-  jobStatusDiv.textContent = '';
-
-  if (!jobId) {
-    jobStatusDiv.textContent = 'Please provide a job ID!';
-    jobStatusDiv.style.color = '#bf616a';
-    return;
-  }
-
+app.get('/v1/job-status/:jobId', async (req, res) => {
   try {
-    jobStatusDiv.textContent = 'Checking job status...';
-    jobStatusDiv.style.color = '#5e81ac';
+    const jobId = req.params.jobId;
+    const result = jobResults[jobId];
 
-    const response = await fetch(`http://localhost:3000/v1/job-status/${jobId}`);
-    const data = await response.json();
-
-    if (response.ok) {
-      jobStatusDiv.innerHTML = `Status: ${data.status} <br> Output file: <a href="${data.result.outputPath}" target="_blank">Download</a>`;
-      jobStatusDiv.style.color = '#a3be8c';
-    } else {
-      jobStatusDiv.textContent = data.error || 'An error occurred.';
-      jobStatusDiv.style.color = '#bf616a';
+    if (!result) {
+      return res.status(404).json({ error: 'Job not found or still processing' });
     }
+
+    return res.json({ status: 'completed', result: { outputPath: path.resolve(result.outputPath) } });
+
   } catch (error) {
-    console.error(error);
-    jobStatusDiv.textContent = 'Error checking job status!';
-    jobStatusDiv.style.color = '#bf616a';
+    console.error('Error in /v1/job-status:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
+});
+
+app.listen(port, () => {
+  console.log(`Server listening at http://localhost:${port}`);
 });

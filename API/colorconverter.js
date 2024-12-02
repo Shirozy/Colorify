@@ -1,3 +1,4 @@
+console.log('Starting server');
 import express from 'express';
 import multer from 'multer';
 import path from 'path';
@@ -42,10 +43,11 @@ function getOutputPath(jobId) {
 async function convertImage(job) {
   const { filePath, jobId, palette, blend } = job;
 
+  console.log(`Converting image ${filePath} to palette ${palette}`);
+
   try {
     const outputFilePath = getOutputPath(jobId);
 
-    // Load the image
     const img = await loadImage(filePath);
     const canvas = createCanvas(img.width, img.height);
     const ctx = canvas.getContext('2d');
@@ -53,7 +55,6 @@ async function convertImage(job) {
 
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-    // Convert image to selected palette
     const convertedData = convertImageToPalette(imageData, palette, blend);
     ctx.putImageData(convertedData, 0, 0);
 
@@ -61,10 +62,10 @@ async function convertImage(job) {
     const buffer = canvas.toBuffer('image/png');
     fs.writeFileSync(outputFilePath, buffer);
 
-    // Delete the original file after processing
+    console.log(`Saved image to ${outputFilePath}`);
+
     fs.unlinkSync(filePath);
 
-    // Store the result
     jobResults[jobId] = { outputPath: outputFilePath };
     return { outputPath: outputFilePath };
   } catch (error) {
@@ -76,6 +77,7 @@ async function convertImage(job) {
 async function processJobs() {
   while (jobQueue.length > 0) {
     const job = jobQueue.shift();
+    console.log(`Processing job ${job.jobId}`);
     try {
       await convertImage(job);
     } catch (error) {
@@ -86,7 +88,6 @@ async function processJobs() {
 
 setInterval(processJobs, 1000);
 
-// Helper functions for color conversion
 function colorDifference(color1, color2) {
   return Math.abs(color1[0] - color2[0]) + Math.abs(color1[1] - color2[1]) + Math.abs(color1[2] - color2[2]);
 }
@@ -126,6 +127,7 @@ function convertImageToPalette(imageData, palette, blend = false) {
 }
 
 app.post('/v1/convert-async', upload.single('file'), async (req, res) => {
+  console.log('Received POST request to /v1/convert-async');
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'You need to provide a valid image file' });
@@ -141,7 +143,6 @@ app.post('/v1/convert-async', upload.single('file'), async (req, res) => {
 
     const palette = colors.split(',').map(color => color.trim());
     
-    // Add job to queue with palette
     jobQueue.push({ jobId, filePath, palette });
 
     res.status(200).json({ jobId });
@@ -152,6 +153,7 @@ app.post('/v1/convert-async', upload.single('file'), async (req, res) => {
 });
 
 app.get('/v1/job-status/:jobId', async (req, res) => {
+  console.log('Received GET request to /v1/job-status/:jobId');
   try {
     const jobId = req.params.jobId;
     const result = jobResults[jobId];
@@ -171,3 +173,4 @@ app.get('/v1/job-status/:jobId', async (req, res) => {
 app.listen(port, () => {
   console.log(`Server listening at http://localhost:${port}`);
 });
+
